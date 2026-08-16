@@ -93,11 +93,32 @@ with tab1:
     with col2:
         neg_file = st.file_uploader("Upload NEG MGF", type=["mgf"], key="neg_mgf")
         
+    st.markdown("""
+    ### ⚙️ Network Parameters Guide
+    * **Score Cutoff**: The minimum MS2DeepScore similarity (0.0 to 1.0) required to draw an edge between two spectra. Higher values (e.g., 0.85) produce stricter, highly confident connections and more isolated sub-graphs. Lowering it connects more distant chemical relatives but risks creating an unreadable "hairball".
+    * **Max Links per Node**: Limits how many connections a single spectrum can have. Keeping this low (e.g., 10) ensures the network remains sparse and visually interpretable by only retaining the absolute top matches for each node.
+    """)
+
     col_param1, col_param2 = st.columns(2)
     with col_param1:
-        score_cutoff = st.slider("Score Cutoff", min_value=0.50, max_value=0.99, value=0.85, step=0.01)
+        score_cutoff = st.slider(
+            "Score Cutoff", 
+            min_value=0.50, 
+            max_value=0.99, 
+            value=0.85, 
+            step=0.01,
+            help="Higher numbers produce more isolated sub-graphs."
+        )
     with col_param2:
-        max_links = st.slider("Max Links per Node", min_value=1, max_value=30, value=10, step=1)
+        max_links = st.slider(
+            "Max Links per Node", 
+            min_value=1, 
+            max_value=30, 
+            value=10, 
+            step=1,
+            help="Lower numbers make sparser networks."
+        )
+    st.markdown("---")
 
     if pos_file and neg_file:
         if st.button("Run Spectral Pipeline", key="btn_step1"):
@@ -187,8 +208,36 @@ with tab1:
                     mapping_df = pd.DataFrame(mapping_records)
                     st.session_state["data_cytoscape_df"] = mapping_df
                     st.session_state["data_cytoscape_csv"] = mapping_df.to_csv(index=False).encode("utf-8")
+                    
+                    # Mark step 1 as complete so buttons persist!
+                    st.session_state["step1_complete"] = True
 
             st.success("Step 1 Complete! Download your files below.")
+            
+    # OUTSIDE the 'if st.button' block, display the download buttons
+    if st.session_state.get("step1_complete"):
+        dcol1, dcol2, dcol3 = st.columns(3)
+        with dcol1:
+            st.download_button(
+                label="Download Network (.graphml)",
+                data=st.session_state["graphml_data"],
+                file_name="ms2ds_graph.graphml",
+                mime="application/xml"
+            )
+        with dcol2:
+            st.download_button(
+                label="Download Node Mapping (data_cytoscape.csv)",
+                data=st.session_state["data_cytoscape_csv"],
+                file_name="data_cytoscape.csv",
+                mime="text/csv"
+            )
+        with dcol3:
+            st.download_button(
+                label="Download Cleaned MGF (.mgf)",
+                data=st.session_state["cleaned_mgf_data"],
+                file_name="cleaned_spectra_pos_neg_numbered.mgf",
+                mime="text/plain"
+            )
             
             dcol1, dcol2, dcol3 = st.columns(3)
             with dcol1:
@@ -342,8 +391,6 @@ with tab2:
                     })
 
                     # 8. Compute and Assign Consensus
-                    defined_classes = define_consensus_classes(final_table)
-                    
                     output_df = defined_classes[[
                         "id", "componentindex", "NPC_Pathway", "NPC_Superclass", "NPC_Class",
                         "NPC_Pathway_Consensus", "NPC_Pathway_Score",
@@ -351,10 +398,51 @@ with tab2:
                         "NPC_Class_Consensus", "NPC_Class_Score"
                     ]]
                     
+                    # Inject MolNetEnhancer annotations back into the networkx Graph
+                    # We set 'id' as the index so networkx correctly maps rows to node IDs
+                    node_attributes = output_df.set_index("id").to_dict("index")
+                    nx.set_node_attributes(G, node_attributes)
+                    
+                    # Export the enriched graph
+                    enriched_graph_path = os.path.join(tmpdir, "enriched_ms2ds_graph.graphml")
+                    nx.write_graphml(G, enriched_graph_path)
+                    
+                    # Save all outputs to session state
+                    with open(enriched_graph_path, "rb") as f:
+                        st.session_state["enriched_graphml"] = f.read()
+                        
                     st.session_state["molnet_csv"] = output_df.to_csv(index=False).encode("utf-8")
                     st.session_state["final_annot_csv"] = merged_annot.to_csv(index=False).encode("utf-8")
 
+                    # Mark step 2 as complete!
+                    st.session_state["step2_complete"] = True
+
             st.success("Step 2 Complete! MolNetEnhancer consensus successfully computed.")
+            
+    # OUTSIDE the 'if st.button' block, display all 3 download buttons
+    if st.session_state.get("step2_complete"):
+        mcol1, mcol2, mcol3 = st.columns(3)
+        with mcol1:
+            st.download_button(
+                label="Download Enriched Network (.graphml)",
+                data=st.session_state["enriched_graphml"],
+                file_name="Enriched_MolNetEnhancer_Graph.graphml",
+                mime="application/xml"
+            )
+        with mcol2:
+            st.download_button(
+                label="Download Consensus Results (.csv)",
+                data=st.session_state["molnet_csv"],
+                file_name="Molnetenhancer_Consensus.csv",
+                mime="text/csv"
+            )
+        with mcol3:
+            st.download_button(
+                label="Download Merged Annotations (.csv)",
+                data=st.session_state["final_annot_csv"],
+                file_name="FinalAnnotationTable_Merged.csv",
+                mime="text/csv"
+            )
             
             mcol1, mcol2 = st.columns(2)
             with mcol1:
