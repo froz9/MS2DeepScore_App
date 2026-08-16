@@ -379,8 +379,6 @@ with tab2:
                     })
 
                     # 8. Compute and Assign Consensus
-                    defined_classes = define_consensus_classes(final_table)
-                    
                     output_cols = [
                         "id", "componentindex", "NPC_Pathway", "NPC_Superclass", "NPC_Class",
                         "NPC_Pathway_Consensus", "NPC_Pathway_Score",
@@ -388,13 +386,29 @@ with tab2:
                         "NPC_Class_Consensus", "NPC_Class_Score"
                     ]
                     
-                    # Final Safeguard: Ensure all requested columns exist before filtering
+                    # Safeguard: Ensure all requested columns exist
                     for col in output_cols:
                         if col not in defined_classes.columns:
                             defined_classes[col] = pd.NA
                             
-                    output_df = defined_classes[output_cols]
+                    output_df = defined_classes[output_cols].copy()
                     
+                    # --- GRAPHML TYPE COMPATIBILITY FIX ---
+                    # Force text columns to be strings and replace NaNs with empty strings
+                    text_cols = ["NPC_Pathway", "NPC_Superclass", "NPC_Class", 
+                                 "NPC_Pathway_Consensus", "NPC_Superclass_Consensus", "NPC_Class_Consensus"]
+                    for col in text_cols:
+                        output_df[col] = output_df[col].fillna("").astype(str)
+                        
+                    # Force score columns to be numeric and replace NaNs with 0.0
+                    score_cols = ["NPC_Pathway_Score", "NPC_Superclass_Score", "NPC_Class_Score"]
+                    for col in score_cols:
+                        output_df[col] = pd.to_numeric(output_df[col], errors='coerce').fillna(0.0)
+                        
+                    # Ensure component index remains an integer
+                    output_df["componentindex"] = pd.to_numeric(output_df["componentindex"], errors='coerce').fillna(-1).astype(int)
+                    # --------------------------------------
+
                     # Inject MolNetEnhancer annotations back into the networkx Graph
                     node_attributes = output_df.set_index("id").to_dict("index")
                     nx.set_node_attributes(G, node_attributes)
@@ -412,8 +426,6 @@ with tab2:
 
                     # Mark step 2 as complete!
                     st.session_state["step2_complete"] = True
-
-            st.success("Step 2 Complete! MolNetEnhancer consensus successfully computed.")
             
     # DISPLAY TAB 2 DOWNLOAD BUTTONS EXACTLY ONCE
     if st.session_state.get("step2_complete"):
