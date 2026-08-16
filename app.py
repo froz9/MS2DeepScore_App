@@ -379,6 +379,9 @@ with tab2:
                     })
 
                     # 8. Compute and Assign Consensus
+                    defined_classes = define_consensus_classes(final_table)
+                    # ------------------------------------------
+
                     output_cols = [
                         "id", "componentindex", "NPC_Pathway", "NPC_Superclass", "NPC_Class",
                         "NPC_Pathway_Consensus", "NPC_Pathway_Score",
