@@ -61,14 +61,22 @@ def define_consensus_classes(data: pd.DataFrame) -> pd.DataFrame:
     
     for level in ["NPC_Pathway", "NPC_Superclass", "NPC_Class"]:
         consensus_df = compute_highest_score(df, level)
-        df = df.merge(consensus_df, on="componentindex", how="left")
+        cons_col = f"{level}_Consensus"
+        score_col = f"{level}_Score"
+        
+        # SAFEGUARD: Ensure columns are added even if consensus_df is empty
+        if consensus_df.empty:
+            df[cons_col] = pd.NA
+            df[score_col] = pd.NA
+        else:
+            df = df.merge(consensus_df, on="componentindex", how="left")
         
         # Keep original if singleton (-1)
-        df.loc[df["componentindex"] == -1, f"{level}_Consensus"] = df[level]
+        df.loc[df["componentindex"] == -1, cons_col] = df[level]
         
         # Propagate consensus to empty original entries
-        fill_mask = (df[level].isna() | df[level].isin(["", "NA"])) & df[f"{level}_Consensus"].notna()
-        df.loc[fill_mask, level] = df.loc[fill_mask, f"{level}_Consensus"]
+        fill_mask = (df[level].isna() | df[level].isin(["", "NA"])) & df[cons_col].notna()
+        df.loc[fill_mask, level] = df.loc[fill_mask, cons_col]
         
     return df
 
@@ -394,15 +402,23 @@ with tab2:
                     })
 
                     # 8. Compute and Assign Consensus
-                    output_df = defined_classes[[
+                    defined_classes = define_consensus_classes(final_table)
+                    
+                    output_cols = [
                         "id", "componentindex", "NPC_Pathway", "NPC_Superclass", "NPC_Class",
                         "NPC_Pathway_Consensus", "NPC_Pathway_Score",
                         "NPC_Superclass_Consensus", "NPC_Superclass_Score",
                         "NPC_Class_Consensus", "NPC_Class_Score"
-                    ]]
+                    ]
+                    
+                    # Final Safeguard: Ensure all requested columns exist before filtering
+                    for col in output_cols:
+                        if col not in defined_classes.columns:
+                            defined_classes[col] = pd.NA
+                            
+                    output_df = defined_classes[output_cols]
                     
                     # Inject MolNetEnhancer annotations back into the networkx Graph
-                    # We set 'id' as the index so networkx correctly maps rows to node IDs
                     node_attributes = output_df.set_index("id").to_dict("index")
                     nx.set_node_attributes(G, node_attributes)
                     
@@ -422,7 +438,7 @@ with tab2:
 
             st.success("Step 2 Complete! MolNetEnhancer consensus successfully computed.")
             
-    # OUTSIDE the 'if st.button' block, display all 3 download buttons
+    # DISPLAY TAB 2 DOWNLOAD BUTTONS EXACTLY ONCE
     if st.session_state.get("step2_complete"):
         mcol1, mcol2, mcol3 = st.columns(3)
         with mcol1:
@@ -449,19 +465,3 @@ with tab2:
                 mime="text/csv",
                 key="btn_dl_annot_tab2"
             )
-            
-            mcol1, mcol2 = st.columns(2)
-            with mcol1:
-                st.download_button(
-                    label="Download MolNetEnhancer Results (.csv)",
-                    data=st.session_state["molnet_csv"],
-                    file_name="Molnetenhancer_Consensus.csv",
-                    mime="text/csv"
-                )
-            with mcol2:
-                st.download_button(
-                    label="Download Merged Annotations Table (.csv)",
-                    data=st.session_state["final_annot_csv"],
-                    file_name="FinalAnnotationTable_Merged.csv",
-                    mime="text/csv"
-                )
