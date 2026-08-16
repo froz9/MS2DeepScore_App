@@ -222,21 +222,24 @@ with tab1:
                 label="Download Network (.graphml)",
                 data=st.session_state["graphml_data"],
                 file_name="ms2ds_graph.graphml",
-                mime="application/xml"
+                mime="application/xml",
+                key="btn_dl_graphml_tab1"
             )
         with dcol2:
             st.download_button(
                 label="Download Node Mapping (data_cytoscape.csv)",
                 data=st.session_state["data_cytoscape_csv"],
                 file_name="data_cytoscape.csv",
-                mime="text/csv"
+                mime="text/csv",
+                key="btn_dl_nodes_tab1"
             )
         with dcol3:
             st.download_button(
                 label="Download Cleaned MGF (.mgf)",
                 data=st.session_state["cleaned_mgf_data"],
                 file_name="cleaned_spectra_pos_neg_numbered.mgf",
-                mime="text/plain"
+                mime="text/plain",
+                key="btn_dl_mgf_tab1"
             )
             
             dcol1, dcol2, dcol3 = st.columns(3)
@@ -427,21 +430,24 @@ with tab2:
                 label="Download Enriched Network (.graphml)",
                 data=st.session_state["enriched_graphml"],
                 file_name="Enriched_MolNetEnhancer_Graph.graphml",
-                mime="application/xml"
+                mime="application/xml",
+                key="btn_dl_enriched_graph_tab2"
             )
         with mcol2:
             st.download_button(
                 label="Download Consensus Results (.csv)",
                 data=st.session_state["molnet_csv"],
                 file_name="Molnetenhancer_Consensus.csv",
-                mime="text/csv"
+                mime="text/csv",
+                key="btn_dl_consensus_tab2"
             )
         with mcol3:
             st.download_button(
                 label="Download Merged Annotations (.csv)",
                 data=st.session_state["final_annot_csv"],
                 file_name="FinalAnnotationTable_Merged.csv",
-                mime="text/csv"
+                mime="text/csv",
+                key="btn_dl_annot_tab2"
             )
             
             mcol1, mcol2 = st.columns(2)
