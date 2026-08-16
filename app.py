@@ -1,9 +1,9 @@
 import os
 import tempfile
 import requests
-from tqdm import tqdm
+import pandas as pd
+import networkx as nx
 import streamlit as st
-
 
 from matchms.importing import load_from_mgf
 from matchms.exporting import save_as_mgf
@@ -13,114 +13,361 @@ from matchms.networking import SimilarityNetwork
 from ms2deepscore.models import load_model
 from ms2deepscore import MS2DeepScore
 
+# ---------------------------------------------------------
+# 1. MODEL UTILITIES
+# ---------------------------------------------------------
 def download_file(link, file_name):
-    # Your existing download logic here
     response = requests.get(link, stream=True)
     if os.path.exists(file_name):
         return
-    total_size = int(response.headers.get('content-length', 0))
+    total_size = int(response.headers.get("content-length", 0))
     with open(file_name, "wb") as f:
         for chunk in response.iter_content(chunk_size=1024):
             if chunk:
                 f.write(chunk)
 
-@st.cache_resource(show_spinner="Downloading and loading MS2DeepScore model... This happens once.")
+@st.cache_resource(show_spinner="Downloading and loading MS2DeepScore model...")
 def get_ms2deepscore_model():
     model_file_name = "ms2deepscore_model.pt"
     model_url = "https://zenodo.org/records/14290920/files/ms2deepscore_model.pt?download=1"
-    
-    # Download on the fly if it doesn't exist in the cloud environment
     if not os.path.exists(model_file_name):
         download_file(model_url, model_file_name)
-        
     return load_model(model_file_name, allow_legacy=True)
 
-st.title("MS2DeepScore Molecular Networking Pipeline")
-st.write("Upload your POS and NEG MGF files to generate a molecular network.")
+# ---------------------------------------------------------
+# 2. MOLNETENHANCER CONSENSUS FUNCTIONS (Python translation)
+# ---------------------------------------------------------
+def compute_highest_score(df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Calculates majority class consensus and consensus score per component."""
+    valid = df[df[column].notna() & (df[column] != "") & (df[column] != "NA")]
+    
+    if valid.empty:
+        return pd.DataFrame(columns=["componentindex", f"{column}_Consensus", f"{column}_Score"])
+    
+    counts = valid.groupby(["componentindex", column]).size().reset_index(name="count")
+    total_per_comp = counts.groupby("componentindex")["count"].transform("sum")
+    counts["score"] = counts["count"] / total_per_comp
+    
+    # Select highest scoring class per component
+    top_classes = counts.sort_values(["componentindex", "count"], ascending=[True, False]).drop_duplicates("componentindex")
+    
+    return top_classes[["componentindex", column, "score"]].rename(
+        columns={column: f"{column}_Consensus", "score": f"{column}_Score"}
+    )
 
-# 2. UI for file uploads
-pos_file = st.file_uploader("Upload Positive Ionization MGF (POS.mgf)", type=["mgf"])
-neg_file = st.file_uploader("Upload Negative Ionization MGF (NEG.mgf)", type=["mgf"])
-
-if pos_file and neg_file:
-    if st.button("Run Pipeline"):
+def define_consensus_classes(data: pd.DataFrame) -> pd.DataFrame:
+    """Propagates consensus classes to network components (excluding singletons)."""
+    df = data.copy()
+    
+    for level in ["NPC_Pathway", "NPC_Superclass", "NPC_Class"]:
+        consensus_df = compute_highest_score(df, level)
+        df = df.merge(consensus_df, on="componentindex", how="left")
         
-        # 3. Processing block with a loading spinner
-        with st.spinner("Processing spectra and calculating similarities. This may take a moment..."):
+        # Keep original if singleton (-1)
+        df.loc[df["componentindex"] == -1, f"{level}_Consensus"] = df[level]
+        
+        # Propagate consensus to empty original entries
+        fill_mask = (df[level].isna() | df[level].isin(["", "NA"])) & df[f"{level}_Consensus"].notna()
+        df.loc[fill_mask, level] = df.loc[fill_mask, f"{level}_Consensus"]
+        
+    return df
+
+# ---------------------------------------------------------
+# 3. STREAMLIT USER INTERFACE
+# ---------------------------------------------------------
+st.set_page_config(page_title="MS2DeepScore & MolNetEnhancer", layout="wide")
+st.title("MS2DeepScore Molecular Networking & Annotation Pipeline")
+
+tab1, tab2 = st.tabs(["Step 1: Network & Spectral Mapping", "Step 2: Annotations & MolNetEnhancer"])
+
+# ---------------------------------------------------------
+# TAB 1: MS2 Processing & GraphML Generation
+# ---------------------------------------------------------
+with tab1:
+    st.subheader("1. Generate MS2DeepScore Molecular Network")
+    st.markdown("Upload raw/preprocessed positive and negative `.mgf` spectral files.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        pos_file = st.file_uploader("Upload POS MGF", type=["mgf"], key="pos_mgf")
+    with col2:
+        neg_file = st.file_uploader("Upload NEG MGF", type=["mgf"], key="neg_mgf")
+        
+    col_param1, col_param2 = st.columns(2)
+    with col_param1:
+        score_cutoff = st.slider("Score Cutoff", min_value=0.50, max_value=0.99, value=0.85, step=0.01)
+    with col_param2:
+        max_links = st.slider("Max Links per Node", min_value=1, max_value=30, value=10, step=1)
+
+    if pos_file and neg_file:
+        if st.button("Run Spectral Pipeline", key="btn_step1"):
+            with st.spinner("Processing spectra, computing embeddings, and constructing graph..."):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    pos_path = os.path.join(tmpdir, "POS.mgf")
+                    neg_path = os.path.join(tmpdir, "NEG.mgf")
+                    with open(pos_path, "wb") as f: f.write(pos_file.getvalue())
+                    with open(neg_path, "wb") as f: f.write(neg_file.getvalue())
+
+                    spectra_neg = list(load_from_mgf(neg_path))
+                    spectra_pos = list(load_from_mgf(pos_path))
+                    combined_path = os.path.join(tmpdir, "combined.mgf")
+                    save_as_mgf(spectra_neg + spectra_pos, combined_path)
+
+                    # MatchMS Quality Filtering
+                    workflow_clean = create_workflow(
+                        query_filters=DEFAULT_FILTERS + [("require_minimum_number_of_peaks", {"n_required": 5})],
+                    )
+                    pipeline_clean = Pipeline(workflow_clean)
+                    pipeline_clean.run(combined_path)
+
+                    # Separate & Add Persistent Identifiers
+                    pos_cleaned, neg_cleaned = [], []
+                    for spectrum in pipeline_clean.spectrums_queries:
+                        if spectrum.get("ionmode") == "positive":
+                            pos_cleaned.append(spectrum)
+                        else:
+                            neg_cleaned.append(spectrum)
+
+                    mapping_records = []
+                    for i, spectrum in enumerate(pos_cleaned):
+                        query_id = f"pos_{i + 1}"
+                        spectrum.set("query_spectrum_nr", query_id)
+                        scans = spectrum.get("scans") or spectrum.get("feature_id") or (i + 1)
+                        mapping_records.append({
+                            "SCANS": int(scans) if str(scans).isdigit() else scans,
+                            "QUERY_SPECTRUM_NR": query_id,
+                            "IONMODE": "positive",
+                            "PEPMASS": spectrum.get("pepmass")[0] if spectrum.get("pepmass") else None,
+                            "RT": spectrum.get("rtinminutes") or spectrum.get("retention_time")
+                        })
+
+                    for i, spectrum in enumerate(neg_cleaned):
+                        query_id = f"neg_{i + 1}"
+                        spectrum.set("query_spectrum_nr", query_id)
+                        scans = spectrum.get("scans") or spectrum.get("feature_id") or (i + 1)
+                        mapping_records.append({
+                            "SCANS": int(scans) if str(scans).isdigit() else scans,
+                            "QUERY_SPECTRUM_NR": query_id,
+                            "IONMODE": "negative",
+                            "PEPMASS": spectrum.get("pepmass")[0] if spectrum.get("pepmass") else None,
+                            "RT": spectrum.get("rtinminutes") or spectrum.get("retention_time")
+                        })
+
+                    numbered_path = os.path.join(tmpdir, "cleaned_numbered.mgf")
+                    all_cleaned = pos_cleaned + neg_cleaned
+                    save_as_mgf(all_cleaned, numbered_path)
+
+                    # Scoring Pipeline
+                    model = get_ms2deepscore_model()
+                    workflow_score = create_workflow(
+                        query_filters=[],
+                        score_computations=[[MS2DeepScore, {"model": model}]],
+                    )
+                    pipeline_score = Pipeline(workflow_score)
+                    pipeline_score.run(numbered_path)
+
+                    # Network Construction
+                    ms2ds_network = SimilarityNetwork(
+                        identifier_key="query_spectrum_nr",
+                        score_cutoff=score_cutoff,
+                        max_links=max_links,
+                        link_method="mutual",
+                    )
+                    ms2ds_network.create_network(pipeline_score.scores, score_name="MS2DeepScore")
+
+                    graphml_path = os.path.join(tmpdir, "ms2ds_graph.graphml")
+                    ms2ds_network.export_to_graphml(graphml_path)
+
+                    # Store session state files
+                    with open(graphml_path, "rb") as f:
+                        st.session_state["graphml_data"] = f.read()
+                    with open(numbered_path, "rb") as f:
+                        st.session_state["cleaned_mgf_data"] = f.read()
+                        
+                    mapping_df = pd.DataFrame(mapping_records)
+                    st.session_state["data_cytoscape_df"] = mapping_df
+                    st.session_state["data_cytoscape_csv"] = mapping_df.to_csv(index=False).encode("utf-8")
+
+            st.success("Step 1 Complete! Download your files below.")
             
-            # Create a temporary directory that cleans itself up automatically
-            with tempfile.TemporaryDirectory() as tmpdir:
-                
-                # Write uploaded bytes to temp files
-                pos_path = os.path.join(tmpdir, "POS.mgf")
-                neg_path = os.path.join(tmpdir, "NEG.mgf")
-                with open(pos_path, "wb") as f: f.write(pos_file.getvalue())
-                with open(neg_path, "wb") as f: f.write(neg_file.getvalue())
-
-                # Load and merge spectra
-                spectra_neg = list(load_from_mgf(neg_path))
-                spectra_pos = list(load_from_mgf(pos_path))
-                all_spectra = spectra_neg + spectra_pos
-                
-                combined_path = os.path.join(tmpdir, "combined_spectra.mgf")
-                save_as_mgf(all_spectra, combined_path)
-
-                # Clean using matchms
-                workflow_clean = create_workflow(
-                    query_filters=DEFAULT_FILTERS + [("require_minimum_number_of_peaks", {"n_required": 5})],
+            dcol1, dcol2, dcol3 = st.columns(3)
+            with dcol1:
+                st.download_button(
+                    label="Download Network (.graphml)",
+                    data=st.session_state["graphml_data"],
+                    file_name="ms2ds_graph.graphml",
+                    mime="application/xml"
                 )
-                pipeline_clean = Pipeline(workflow_clean)
-                pipeline_clean.run(combined_path)
-
-                # Separate pos/neg and add identifiers
-                pos_cleaned = []
-                neg_cleaned = []
-                for spectrum in pipeline_clean.spectrums_queries:
-                    if spectrum.get("ionmode") == "positive":
-                        pos_cleaned.append(spectrum)
-                    else:
-                        neg_cleaned.append(spectrum)
-
-                for i, spectrum in enumerate(pos_cleaned):
-                    spectrum.set("query_spectrum_nr", "pos_" + str(i + 1))
-                for i, spectrum in enumerate(neg_cleaned):
-                    spectrum.set("query_spectrum_nr", "neg_" + str(i + 1))
-
-                numbered_path = os.path.join(tmpdir, "cleaned_numbered.mgf")
-                save_as_mgf(pos_cleaned + neg_cleaned, numbered_path)
-
-                # Load model and compute MS2DeepScore similarities
-                model = get_ms2deepscore_model()
-                workflow_score = create_workflow(
-                    query_filters=[],
-                    score_computations=[[MS2DeepScore, {"model": model}]],
+            with dcol2:
+                st.download_button(
+                    label="Download Node Mapping (data_cytoscape.csv)",
+                    data=st.session_state["data_cytoscape_csv"],
+                    file_name="data_cytoscape.csv",
+                    mime="text/csv"
                 )
-                pipeline_score = Pipeline(workflow_score)
-                pipeline_score.run(numbered_path)
-
-                # Create the similarity network using your exact parameters
-                ms2ds_network = SimilarityNetwork(
-                    identifier_key="query_spectrum_nr",
-                    score_cutoff=0.85,
-                    max_links=10,
-                    link_method="mutual",
+            with dcol3:
+                st.download_button(
+                    label="Download Cleaned MGF (.mgf)",
+                    data=st.session_state["cleaned_mgf_data"],
+                    file_name="cleaned_spectra_pos_neg_numbered.mgf",
+                    mime="text/plain"
                 )
-                ms2ds_network.create_network(pipeline_score.scores, score_name="MS2DeepScore")
 
-                # Export to GraphML
-                graphml_path = os.path.join(tmpdir, "ms2ds_graph.graphml")
-                ms2ds_network.export_to_graphml(graphml_path)
+# ---------------------------------------------------------
+# TAB 2: Annotations Merging & MolNetEnhancer Execution
+# ---------------------------------------------------------
+with tab2:
+    st.subheader("2. Merge Annotations & Run MolNetEnhancer")
+    st.markdown(
+        "Upload the Annotation Tables and SIRIUS/CANOPUS predictions for each ionization mode. "
+        "The graph component assignments will be derived directly from the generated `.graphml`."
+    )
+    
+    col_a1, col_a2 = st.columns(2)
+    with col_a1:
+        st.markdown("**Positive Mode Inputs**")
+        pos_annot_file = st.file_uploader("POS Annotation Table (CSV)", type=["csv"], key="pos_annot")
+        pos_canopus_file = st.file_uploader("POS CANOPUS Summary (TSV)", type=["tsv", "txt"], key="pos_canopus")
+    with col_a2:
+        st.markdown("**Negative Mode Inputs**")
+        neg_annot_file = st.file_uploader("NEG Annotation Table (CSV)", type=["csv"], key="neg_annot")
+        neg_canopus_file = st.file_uploader("NEG CANOPUS Summary (TSV)", type=["tsv", "txt"], key="neg_canopus")
 
-                # Read the generated file back into memory for downloading
-                with open(graphml_path, "rb") as f:
-                    graphml_data = f.read()
+    # Allow uploading a previously saved data_cytoscape.csv or GraphML if not in state
+    if "data_cytoscape_df" not in st.session_state or "graphml_data" not in st.session_state:
+        st.warning("Step 1 data not found in current session memory. Please provide them below:")
+        upl_col1, upl_col2 = st.columns(2)
+        with upl_col1:
+            fallback_map = st.file_uploader("Upload data_cytoscape.csv", type=["csv"], key="fallback_map")
+            if fallback_map:
+                st.session_state["data_cytoscape_df"] = pd.read_csv(fallback_map)
+        with upl_col2:
+            fallback_graph = st.file_uploader("Upload ms2ds_graph.graphml", type=["graphml", "xml"], key="fallback_graph")
+            if fallback_graph:
+                st.session_state["graphml_data"] = fallback_graph.getvalue()
 
-        st.success("Pipeline complete! Your network is ready.")
-        
-        # 4. Provide a download button for the result
-        st.download_button(
-            label="Download Molecular Network (.graphml)",
-            data=graphml_data,
-            file_name="ms2ds_network.graphml",
-            mime="application/xml"
-        )
+    all_inputs_ready = (
+        pos_annot_file and neg_annot_file and 
+        pos_canopus_file and neg_canopus_file and
+        "data_cytoscape_df" in st.session_state and
+        "graphml_data" in st.session_state
+    )
+
+    if all_inputs_ready:
+        if st.button("Run MolNetEnhancer Enrichment", key="btn_step2"):
+            with st.spinner("Merging annotations, mapping network topologies, and computing consensus..."):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    # 1. Parse Graph Structure & Connected Components
+                    graph_file_path = os.path.join(tmpdir, "temp_graph.graphml")
+                    with open(graph_file_path, "wb") as f:
+                        f.write(st.session_state["graphml_data"])
+                    
+                    G = nx.read_graphml(graph_file_path)
+                    
+                    # Extract node table & components
+                    node_rows = []
+                    components = list(nx.connected_components(G))
+                    
+                    for comp_idx, comp_nodes in enumerate(components, start=1):
+                        for node_id in comp_nodes:
+                            degree = G.degree(node_id)
+                            # Singletons marked with -1
+                            c_idx = -1 if degree == 0 else comp_idx
+                            node_rows.append({"id": str(node_id), "componentindex": c_idx})
+                            
+                    net_df = pd.DataFrame(node_rows)
+
+                    # 2. Process MS2 Base Data
+                    ms2_data = st.session_state["data_cytoscape_df"].copy()
+                    ms2_data = ms2_data.rename(columns={"SCANS": "row.ID", "QUERY_SPECTRUM_NR": "id"})
+                    ms2_data["id"] = ms2_data["id"].astype(str)
+                    ms2_data["row.ID"] = ms2_data["row.ID"].astype(str)
+
+                    # 3. Process CANOPUS data
+                    canopus_pos = pd.read_csv(pos_canopus_file, sep="\t")
+                    canopus_pos["IONMODE"] = "positive"
+                    canopus_neg = pd.read_csv(neg_canopus_file, sep="\t")
+                    canopus_neg["IONMODE"] = "negative"
+                    
+                    canopus_all = pd.concat([canopus_pos, canopus_neg], ignore_index=True)
+                    canopus_all = canopus_all.rename(columns={"mappingFeatureId": "row.ID"})
+                    canopus_all["row.ID"] = canopus_all["row.ID"].astype(str)
+                    
+                    # Ensure standard column naming
+                    canopus_cols = ["row.ID", "NPC.pathway", "NPC.superclass", "NPC.class", "IONMODE"]
+                    canopus_all = canopus_all[[c for c in canopus_cols if c in canopus_all.columns]]
+
+                    # 4. Process Annotation tables
+                    annot_pos = pd.read_csv(pos_annot_file)
+                    annot_neg = pd.read_csv(neg_annot_file)
+                    annot_pos["row.ID"] = annot_pos["row.ID"].astype(str)
+                    annot_neg["row.ID"] = annot_neg["row.ID"].astype(str)
+                    
+                    ms2_pos = ms2_data[ms2_data["IONMODE"] == "positive"][["row.ID", "id"]].merge(annot_pos, on="row.ID", how="inner")
+                    ms2_neg = ms2_data[ms2_data["IONMODE"] == "negative"][["row.ID", "id"]].merge(annot_neg, on="row.ID", how="inner")
+                    
+                    merged_annot = pd.concat([ms2_pos, ms2_neg], ignore_index=True)
+                    
+                    # Harmonize column names
+                    merged_annot = merged_annot.rename(columns={
+                        "NPCPathway": "NPCPathway",
+                        "NPCSuperclass": "NPCSuperclass",
+                        "NPCClass": "NPCClass"
+                    })
+                    merged_annot["id"] = merged_annot["id"].astype(str)
+
+                    # 5. Dual-Key Merging (id/row.ID + IONMODE)
+                    all_data = canopus_all.merge(ms2_data, on=["row.ID", "IONMODE"], how="left")
+                    all_data = all_data.merge(merged_annot, on="id", how="left")
+                    all_data = all_data.dropna(subset=["id"]).drop_duplicates(subset=["id"])
+
+                    # 6. Apply Tiering Rules (Annotations > CANOPUS)
+                    def resolve_hierarchy(primary_col, secondary_col, df):
+                        primary = df[primary_col] if primary_col in df else pd.Series(None, index=df.index)
+                        secondary = df[secondary_col] if secondary_col in df else pd.Series(None, index=df.index)
+                        return primary.combine_first(secondary)
+
+                    all_data["Final_NPC_Pathway"] = resolve_hierarchy("NPCPathway", "NPC.pathway", all_data)
+                    all_data["Final_NPC_Superclass"] = resolve_hierarchy("NPCSuperclass", "NPC.superclass", all_data)
+                    all_data["Final_NPC_Class"] = resolve_hierarchy("NPCClass", "NPC.class", all_data)
+
+                    canopus_final = all_data[["id", "Final_NPC_Pathway", "Final_NPC_Superclass", "Final_NPC_Class"]].copy()
+
+                    # 7. Join with Graph Components
+                    final_table = canopus_final.merge(net_df, on="id", how="right")
+                    final_table = final_table.rename(columns={
+                        "Final_NPC_Pathway": "NPC_Pathway",
+                        "Final_NPC_Superclass": "NPC_Superclass",
+                        "Final_NPC_Class": "NPC_Class"
+                    })
+
+                    # 8. Compute and Assign Consensus
+                    defined_classes = define_consensus_classes(final_table)
+                    
+                    output_df = defined_classes[[
+                        "id", "componentindex", "NPC_Pathway", "NPC_Superclass", "NPC_Class",
+                        "NPC_Pathway_Consensus", "NPC_Pathway_Score",
+                        "NPC_Superclass_Consensus", "NPC_Superclass_Score",
+                        "NPC_Class_Consensus", "NPC_Class_Score"
+                    ]]
+                    
+                    st.session_state["molnet_csv"] = output_df.to_csv(index=False).encode("utf-8")
+                    st.session_state["final_annot_csv"] = merged_annot.to_csv(index=False).encode("utf-8")
+
+            st.success("Step 2 Complete! MolNetEnhancer consensus successfully computed.")
+            
+            mcol1, mcol2 = st.columns(2)
+            with mcol1:
+                st.download_button(
+                    label="Download MolNetEnhancer Results (.csv)",
+                    data=st.session_state["molnet_csv"],
+                    file_name="Molnetenhancer_Consensus.csv",
+                    mime="text/csv"
+                )
+            with mcol2:
+                st.download_button(
+                    label="Download Merged Annotations Table (.csv)",
+                    data=st.session_state["final_annot_csv"],
+                    file_name="FinalAnnotationTable_Merged.csv",
+                    mime="text/csv"
+                )

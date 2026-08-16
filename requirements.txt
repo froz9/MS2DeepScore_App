@@ -3,3 +3,5 @@ matchms
 ms2deepscore
 requests
 tqdm
+pandas
+networkx
