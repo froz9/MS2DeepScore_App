@@ -249,29 +249,6 @@ with tab1:
                 mime="text/plain",
                 key="btn_dl_mgf_tab1"
             )
-            
-            dcol1, dcol2, dcol3 = st.columns(3)
-            with dcol1:
-                st.download_button(
-                    label="Download Network (.graphml)",
-                    data=st.session_state["graphml_data"],
-                    file_name="ms2ds_graph.graphml",
-                    mime="application/xml"
-                )
-            with dcol2:
-                st.download_button(
-                    label="Download Node Mapping (data_cytoscape.csv)",
-                    data=st.session_state["data_cytoscape_csv"],
-                    file_name="data_cytoscape.csv",
-                    mime="text/csv"
-                )
-            with dcol3:
-                st.download_button(
-                    label="Download Cleaned MGF (.mgf)",
-                    data=st.session_state["cleaned_mgf_data"],
-                    file_name="cleaned_spectra_pos_neg_numbered.mgf",
-                    mime="text/plain"
-                )
 
 # ---------------------------------------------------------
 # TAB 2: Annotations Merging & MolNetEnhancer Execution
