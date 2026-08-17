@@ -59,7 +59,13 @@ def define_consensus_classes(data: pd.DataFrame) -> pd.DataFrame:
     """Propagates consensus classes to network components (excluding singletons)."""
     df = data.copy()
     
-    for level in ["NPC_Pathway", "NPC_Superclass", "NPC_Class"]:
+    # Include both NPC and ClassyFire ontology levels
+    levels = [
+        "NPC_Pathway", "NPC_Superclass", "NPC_Class",
+        "CF_Superclass", "CF_Class", "CF_Subclass"
+    ]
+    
+    for level in levels:
         consensus_df = compute_highest_score(df, level)
         cons_col = f"{level}_Consensus"
         score_col = f"{level}_Score"
@@ -256,7 +262,7 @@ with tab1:
 with tab2:
     st.subheader("2. Merge Annotations & Run MolNetEnhancer")
     st.markdown(
-        "Upload the Annotation Tables and SIRIUS/CANOPUS predictions for each ionization mode. "
+        "Upload the Annotation Tables and SIRIUS/CANOPUS structure predictions for each ionization mode. "
         "The graph component assignments will be derived directly from the generated `.graphml`."
     )
     
@@ -264,11 +270,11 @@ with tab2:
     with col_a1:
         st.markdown("**Positive Mode Inputs**")
         pos_annot_file = st.file_uploader("POS Annotation Table (CSV)", type=["csv"], key="pos_annot")
-        pos_canopus_file = st.file_uploader("POS CANOPUS Summary (TSV)", type=["tsv", "txt"], key="pos_canopus")
+        pos_canopus_file = st.file_uploader("POS CANOPUS Structure (TSV)", type=["tsv", "txt"], key="pos_canopus", help="Upload canopus_structure_summary.tsv")
     with col_a2:
         st.markdown("**Negative Mode Inputs**")
         neg_annot_file = st.file_uploader("NEG Annotation Table (CSV)", type=["csv"], key="neg_annot")
-        neg_canopus_file = st.file_uploader("NEG CANOPUS Summary (TSV)", type=["tsv", "txt"], key="neg_canopus")
+        neg_canopus_file = st.file_uploader("NEG CANOPUS Structure (TSV)", type=["tsv", "txt"], key="neg_canopus", help="Upload canopus_structure_summary.tsv")
 
     # Allow uploading a previously saved data_cytoscape.csv or GraphML if not in state
     if "data_cytoscape_df" not in st.session_state or "graphml_data" not in st.session_state:
@@ -318,22 +324,33 @@ with tab2:
                     ms2_data = st.session_state["data_cytoscape_df"].copy()
                     ms2_data = ms2_data.rename(columns={"SCANS": "row.ID", "QUERY_SPECTRUM_NR": "id"})
                     
-                    # SAFEGUARD: Clean IDs to ensure perfect matching (removes .0 from floats read as strings)
+                    # SAFEGUARD: Clean IDs to ensure perfect matching
                     ms2_data["id"] = ms2_data["id"].astype(str).str.strip()
                     ms2_data["row.ID"] = ms2_data["row.ID"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 
-                    # 3. Process CANOPUS data
+                    # 3. Process CANOPUS Structure Summary data
                     canopus_pos = pd.read_csv(pos_canopus_file, sep="\t")
                     canopus_pos["IONMODE"] = "positive"
                     canopus_neg = pd.read_csv(neg_canopus_file, sep="\t")
                     canopus_neg["IONMODE"] = "negative"
                     
                     canopus_all = pd.concat([canopus_pos, canopus_neg], ignore_index=True)
-                    canopus_all = canopus_all.rename(columns={"mappingFeatureId": "row.ID"})
+                    
+                    # Safely map structure summary columns (using # instead of .)
+                    canopus_cols_map = {
+                        "mappingFeatureId": "row.ID",
+                        "NPC#pathway": "CANOPUS_NPC_Pathway",
+                        "NPC#superclass": "CANOPUS_NPC_Superclass",
+                        "NPC#class": "CANOPUS_NPC_Class",
+                        "ClassyFire#superclass": "CANOPUS_CF_Superclass",
+                        "ClassyFire#class": "CANOPUS_CF_Class",
+                        "ClassyFire#subclass": "CANOPUS_CF_Subclass"
+                    }
+                    canopus_all = canopus_all.rename(columns=canopus_cols_map)
                     canopus_all["row.ID"] = canopus_all["row.ID"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
                     # Ensure standard column naming
-                    canopus_cols = ["row.ID", "NPC.pathway", "NPC.superclass", "NPC.class", "IONMODE"]
+                    canopus_cols = ["row.ID", "IONMODE"] + [val for val in canopus_cols_map.values() if val != "row.ID"]
                     canopus_all = canopus_all[[c for c in canopus_cols if c in canopus_all.columns]]
 
                     # 4. Process Annotation tables
@@ -349,6 +366,20 @@ with tab2:
                     
                     merged_annot = pd.concat([ms2_pos, ms2_neg], ignore_index=True)
                     merged_annot["id"] = merged_annot["id"].astype(str).str.strip()
+                    
+                    # Harmonize generic annotation column names if they use different conventions
+                    annot_rename_map = {
+                        "NPCPathway": "NPC_Pathway_Annot",
+                        "NPCSuperclass": "NPC_Superclass_Annot",
+                        "NPCClass": "NPC_Class_Annot",
+                        "Superclass": "CF_Superclass_Annot",
+                        "Class": "CF_Class_Annot",
+                        "Subclass": "CF_Subclass_Annot",
+                        "CF_Superclass": "CF_Superclass_Annot",
+                        "CF_Class": "CF_Class_Annot",
+                        "CF_Subclass": "CF_Subclass_Annot"
+                    }
+                    merged_annot = merged_annot.rename(columns=annot_rename_map)
 
                     # 5. Dual-Key Merging (Base = ms2_data to keep everything)
                     all_data = ms2_data.copy()
@@ -357,7 +388,7 @@ with tab2:
                     all_data = all_data.merge(canopus_all, on=["row.ID", "IONMODE"], how="left")
                     
                     # Merge GNPS Annotations (drop duplicates to prevent fan-out)
-                    annot_clean = merged_annot.drop(columns=["row.ID"], errors="ignore").drop_duplicates(subset=["id"])
+                    annot_clean = merged_annot.drop(columns=["row.ID", "IONMODE"], errors="ignore").drop_duplicates(subset=["id"])
                     all_data = all_data.merge(annot_clean, on="id", how="left")
                     
                     all_data = all_data.drop_duplicates(subset=["id"])
@@ -373,29 +404,41 @@ with tab2:
                         
                         return primary.combine_first(secondary)
 
-                    all_data["Final_NPC_Pathway"] = resolve_hierarchy("NPCPathway", "NPC.pathway", all_data)
-                    all_data["Final_NPC_Superclass"] = resolve_hierarchy("NPCSuperclass", "NPC.superclass", all_data)
-                    all_data["Final_NPC_Class"] = resolve_hierarchy("NPCClass", "NPC.class", all_data)
+                    all_data["Final_NPC_Pathway"] = resolve_hierarchy("NPC_Pathway_Annot", "CANOPUS_NPC_Pathway", all_data)
+                    all_data["Final_NPC_Superclass"] = resolve_hierarchy("NPC_Superclass_Annot", "CANOPUS_NPC_Superclass", all_data)
+                    all_data["Final_NPC_Class"] = resolve_hierarchy("NPC_Class_Annot", "CANOPUS_NPC_Class", all_data)
+                    
+                    all_data["Final_CF_Superclass"] = resolve_hierarchy("CF_Superclass_Annot", "CANOPUS_CF_Superclass", all_data)
+                    all_data["Final_CF_Class"] = resolve_hierarchy("CF_Class_Annot", "CANOPUS_CF_Class", all_data)
+                    all_data["Final_CF_Subclass"] = resolve_hierarchy("CF_Subclass_Annot", "CANOPUS_CF_Subclass", all_data)
 
-                    canopus_final = all_data[["id", "Final_NPC_Pathway", "Final_NPC_Superclass", "Final_NPC_Class"]].copy()
+                    canopus_final = all_data[["id", "Final_NPC_Pathway", "Final_NPC_Superclass", "Final_NPC_Class",
+                                              "Final_CF_Superclass", "Final_CF_Class", "Final_CF_Subclass"]].copy()
 
                     # 7. Join with Graph Components
                     final_table = canopus_final.merge(net_df, on="id", how="right")
                     final_table = final_table.rename(columns={
                         "Final_NPC_Pathway": "NPC_Pathway",
                         "Final_NPC_Superclass": "NPC_Superclass",
-                        "Final_NPC_Class": "NPC_Class"
+                        "Final_NPC_Class": "NPC_Class",
+                        "Final_CF_Superclass": "CF_Superclass",
+                        "Final_CF_Class": "CF_Class",
+                        "Final_CF_Subclass": "CF_Subclass"
                     })
 
                     # 8. Compute and Assign Consensus
                     defined_classes = define_consensus_classes(final_table)
-                    # ------------------------------------------
 
                     output_cols = [
-                        "id", "componentindex", "NPC_Pathway", "NPC_Superclass", "NPC_Class",
+                        "id", "componentindex", 
+                        "NPC_Pathway", "NPC_Superclass", "NPC_Class",
                         "NPC_Pathway_Consensus", "NPC_Pathway_Score",
                         "NPC_Superclass_Consensus", "NPC_Superclass_Score",
-                        "NPC_Class_Consensus", "NPC_Class_Score"
+                        "NPC_Class_Consensus", "NPC_Class_Score",
+                        "CF_Superclass", "CF_Class", "CF_Subclass",
+                        "CF_Superclass_Consensus", "CF_Superclass_Score",
+                        "CF_Class_Consensus", "CF_Class_Score",
+                        "CF_Subclass_Consensus", "CF_Subclass_Score"
                     ]
                     
                     # Safeguard: Ensure all requested columns exist
@@ -407,13 +450,20 @@ with tab2:
                     
                     # --- GRAPHML TYPE COMPATIBILITY FIX ---
                     # Force text columns to be strings and replace NaNs with empty strings
-                    text_cols = ["NPC_Pathway", "NPC_Superclass", "NPC_Class", 
-                                 "NPC_Pathway_Consensus", "NPC_Superclass_Consensus", "NPC_Class_Consensus"]
+                    text_cols = [
+                        "NPC_Pathway", "NPC_Superclass", "NPC_Class", 
+                        "NPC_Pathway_Consensus", "NPC_Superclass_Consensus", "NPC_Class_Consensus",
+                        "CF_Superclass", "CF_Class", "CF_Subclass",
+                        "CF_Superclass_Consensus", "CF_Class_Consensus", "CF_Subclass_Consensus"
+                    ]
                     for col in text_cols:
                         output_df[col] = output_df[col].fillna("").astype(str)
                         
                     # Force score columns to be numeric and replace NaNs with 0.0
-                    score_cols = ["NPC_Pathway_Score", "NPC_Superclass_Score", "NPC_Class_Score"]
+                    score_cols = [
+                        "NPC_Pathway_Score", "NPC_Superclass_Score", "NPC_Class_Score",
+                        "CF_Superclass_Score", "CF_Class_Score", "CF_Subclass_Score"
+                    ]
                     for col in score_cols:
                         output_df[col] = pd.to_numeric(output_df[col], errors='coerce').fillna(0.0)
                         
@@ -438,6 +488,8 @@ with tab2:
 
                     # Mark step 2 as complete!
                     st.session_state["step2_complete"] = True
+
+            st.success("Step 2 Complete! MolNetEnhancer consensus successfully computed.")
             
     # DISPLAY TAB 2 DOWNLOAD BUTTONS EXACTLY ONCE
     if st.session_state.get("step2_complete"):
