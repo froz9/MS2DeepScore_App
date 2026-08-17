@@ -157,13 +157,22 @@ with tab1:
 
                     # Separate & Add Persistent Identifiers
                     pos_cleaned, neg_cleaned = [], []
-                    for spectrum in pipeline_clean.spectrums_queries:
+                    for spectrum in pipeline_clean.spectra_queries: # Use spectra_queries to avoid the deprecation warning!
                         if spectrum.get("ionmode") == "positive":
                             pos_cleaned.append(spectrum)
                         else:
                             neg_cleaned.append(spectrum)
 
                     mapping_records = []
+                    
+                    def get_safe_precursor_mz(spec):
+                        """Safely extracts precursor m/z whether filtered or raw."""
+                        prec_mz = spec.get("precursor_mz")
+                        if prec_mz is None and spec.get("pepmass"):
+                            pep = spec.get("pepmass")
+                            prec_mz = pep[0] if isinstance(pep, (tuple, list)) else pep
+                        return prec_mz
+
                     for i, spectrum in enumerate(pos_cleaned):
                         query_id = f"pos_{i + 1}"
                         spectrum.set("query_spectrum_nr", query_id)
@@ -172,7 +181,7 @@ with tab1:
                             "SCANS": int(scans) if str(scans).isdigit() else scans,
                             "QUERY_SPECTRUM_NR": query_id,
                             "IONMODE": "positive",
-                            "PEPMASS": spectrum.get("pepmass")[0] if spectrum.get("pepmass") else None,
+                            "PRECURSOR_MZ": get_safe_precursor_mz(spectrum),
                             "RT": spectrum.get("rtinminutes") or spectrum.get("retention_time")
                         })
 
@@ -184,7 +193,7 @@ with tab1:
                             "SCANS": int(scans) if str(scans).isdigit() else scans,
                             "QUERY_SPECTRUM_NR": query_id,
                             "IONMODE": "negative",
-                            "PEPMASS": spectrum.get("pepmass")[0] if spectrum.get("pepmass") else None,
+                            "PRECURSOR_MZ": get_safe_precursor_mz(spectrum),
                             "RT": spectrum.get("rtinminutes") or spectrum.get("retention_time")
                         })
 
