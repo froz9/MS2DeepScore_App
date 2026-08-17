@@ -378,21 +378,25 @@ with tab2:
                             
                     output_df = defined_classes[output_cols].copy()
                     
-                    # --- GRAPHML TYPE COMPATIBILITY FIX ---
-                    text_cols = [
-                        
+                    # --- ISOLATE GRAPHML COLUMNS ---
+                    # We only push the final consensus labels to the graph to keep it clean
+                    graph_cols = [
+                        "id", "componentindex",
                         "NPC_Pathway_Consensus", "NPC_Superclass_Consensus", "NPC_Class_Consensus",
-                        
                         "CF_Superclass_Consensus", "CF_Class_Consensus", "CF_Subclass_Consensus"
                     ]
-                    for col in text_cols:
-                        output_df[col] = output_df[col].fillna("").astype(str)
-                                            
-                    output_df["componentindex"] = pd.to_numeric(output_df["componentindex"], errors='coerce').fillna(-1).astype(int)
+                    graph_df = output_df[graph_cols].copy()
+                    
+                    # --- GRAPHML TYPE COMPATIBILITY FIX ---
+                    text_cols_graph = [c for c in graph_cols if c not in ["id", "componentindex"]]
+                    for col in text_cols_graph:
+                        graph_df[col] = graph_df[col].fillna("").astype(str)
+                        
+                    graph_df["componentindex"] = pd.to_numeric(graph_df["componentindex"], errors='coerce').fillna(-1).astype(int)
                     # --------------------------------------
 
-                    # Inject MolNetEnhancer annotations back into the networkx Graph
-                    node_attributes = output_df.set_index("id").to_dict("index")
+                    # Inject ONLY the consensus annotations back into the networkx Graph
+                    node_attributes = graph_df.set_index("id").to_dict("index")
                     nx.set_node_attributes(G, node_attributes)
                     
                     # Export the enriched graph
@@ -403,6 +407,7 @@ with tab2:
                     with open(enriched_graph_path, "rb") as f:
                         st.session_state["enriched_graphml"] = f.read()
                         
+                    # Save the full DataFrame (with scores and raw classes) to the CSV
                     st.session_state["molnet_csv"] = output_df.to_csv(index=False).encode("utf-8")
                     st.session_state["step2_complete"] = True
 
