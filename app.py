@@ -317,8 +317,10 @@ with tab2:
                     # 2. Process MS2 Base Data
                     ms2_data = st.session_state["data_cytoscape_df"].copy()
                     ms2_data = ms2_data.rename(columns={"SCANS": "row.ID", "QUERY_SPECTRUM_NR": "id"})
-                    ms2_data["id"] = ms2_data["id"].astype(str)
-                    ms2_data["row.ID"] = ms2_data["row.ID"].astype(str)
+                    
+                    # SAFEGUARD: Clean IDs to ensure perfect matching (removes .0 from floats read as strings)
+                    ms2_data["id"] = ms2_data["id"].astype(str).str.strip()
+                    ms2_data["row.ID"] = ms2_data["row.ID"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 
                     # 3. Process CANOPUS data
                     canopus_pos = pd.read_csv(pos_canopus_file, sep="\t")
@@ -328,7 +330,7 @@ with tab2:
                     
                     canopus_all = pd.concat([canopus_pos, canopus_neg], ignore_index=True)
                     canopus_all = canopus_all.rename(columns={"mappingFeatureId": "row.ID"})
-                    canopus_all["row.ID"] = canopus_all["row.ID"].astype(str)
+                    canopus_all["row.ID"] = canopus_all["row.ID"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
                     # Ensure standard column naming
                     canopus_cols = ["row.ID", "NPC.pathway", "NPC.superclass", "NPC.class", "IONMODE"]
@@ -337,31 +339,38 @@ with tab2:
                     # 4. Process Annotation tables
                     annot_pos = pd.read_csv(pos_annot_file)
                     annot_neg = pd.read_csv(neg_annot_file)
-                    annot_pos["row.ID"] = annot_pos["row.ID"].astype(str)
-                    annot_neg["row.ID"] = annot_neg["row.ID"].astype(str)
                     
-                    ms2_pos = ms2_data[ms2_data["IONMODE"] == "positive"][["row.ID", "id"]].merge(annot_pos, on="row.ID", how="inner")
-                    ms2_neg = ms2_data[ms2_data["IONMODE"] == "negative"][["row.ID", "id"]].merge(annot_neg, on="row.ID", how="inner")
+                    annot_pos["row.ID"] = annot_pos["row.ID"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                    annot_neg["row.ID"] = annot_neg["row.ID"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                    
+                    # Create merged_annot keeping all MS2 nodes (LEFT JOIN)
+                    ms2_pos = ms2_data[ms2_data["IONMODE"] == "positive"][["row.ID", "id"]].merge(annot_pos, on="row.ID", how="left")
+                    ms2_neg = ms2_data[ms2_data["IONMODE"] == "negative"][["row.ID", "id"]].merge(annot_neg, on="row.ID", how="left")
                     
                     merged_annot = pd.concat([ms2_pos, ms2_neg], ignore_index=True)
-                    
-                    # Harmonize column names
-                    merged_annot = merged_annot.rename(columns={
-                        "NPCPathway": "NPCPathway",
-                        "NPCSuperclass": "NPCSuperclass",
-                        "NPCClass": "NPCClass"
-                    })
-                    merged_annot["id"] = merged_annot["id"].astype(str)
+                    merged_annot["id"] = merged_annot["id"].astype(str).str.strip()
 
-                    # 5. Dual-Key Merging (id/row.ID + IONMODE)
-                    all_data = canopus_all.merge(ms2_data, on=["row.ID", "IONMODE"], how="left")
-                    all_data = all_data.merge(merged_annot, on="id", how="left")
-                    all_data = all_data.dropna(subset=["id"]).drop_duplicates(subset=["id"])
+                    # 5. Dual-Key Merging (Base = ms2_data to keep everything)
+                    all_data = ms2_data.copy()
+                    
+                    # Merge CANOPUS
+                    all_data = all_data.merge(canopus_all, on=["row.ID", "IONMODE"], how="left")
+                    
+                    # Merge GNPS Annotations (drop duplicates to prevent fan-out)
+                    annot_clean = merged_annot.drop(columns=["row.ID"], errors="ignore").drop_duplicates(subset=["id"])
+                    all_data = all_data.merge(annot_clean, on="id", how="left")
+                    
+                    all_data = all_data.drop_duplicates(subset=["id"])
 
                     # 6. Apply Tiering Rules (Annotations > CANOPUS)
                     def resolve_hierarchy(primary_col, secondary_col, df):
-                        primary = df[primary_col] if primary_col in df else pd.Series(None, index=df.index)
-                        secondary = df[secondary_col] if secondary_col in df else pd.Series(None, index=df.index)
+                        primary = df[primary_col] if primary_col in df.columns else pd.Series(pd.NA, index=df.index)
+                        secondary = df[secondary_col] if secondary_col in df.columns else pd.Series(pd.NA, index=df.index)
+                        
+                        # Replace empty strings and text "NA" with actual pd.NA so combine_first works
+                        primary = primary.replace(["", "NA", "nan", "NaN"], pd.NA)
+                        secondary = secondary.replace(["", "NA", "nan", "NaN"], pd.NA)
+                        
                         return primary.combine_first(secondary)
 
                     all_data["Final_NPC_Pathway"] = resolve_hierarchy("NPCPathway", "NPC.pathway", all_data)
