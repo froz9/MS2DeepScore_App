@@ -113,8 +113,9 @@ with tab1:
     * **Max Links per Node**: Limits how many connections a single spectrum can have. Keeping this low (e.g., 10) ensures the network remains sparse and visually interpretable by only retaining the absolute top matches for each node.
     """)
 
-   col_param1, col_param2, col_param3 = st.columns(3)
-   
+    # Notice the 4 spaces here so it perfectly aligns with st.markdown above!
+    col_param1, col_param2, col_param3 = st.columns(3)
+    
     with col_param1:
         score_cutoff = st.slider(
             "Score Cutoff", 
