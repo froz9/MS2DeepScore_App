@@ -114,6 +114,7 @@ with tab1:
     """)
 
    col_param1, col_param2, col_param3 = st.columns(3)
+   
     with col_param1:
         score_cutoff = st.slider(
             "Score Cutoff", 
