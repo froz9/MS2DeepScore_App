@@ -113,24 +113,24 @@ with tab1:
     * **Max Links per Node**: Limits how many connections a single spectrum can have. Keeping this low (e.g., 10) ensures the network remains sparse and visually interpretable by only retaining the absolute top matches for each node.
     """)
 
-    col_param1, col_param2 = st.columns(2)
+   col_param1, col_param2, col_param3 = st.columns(3)
     with col_param1:
         score_cutoff = st.slider(
             "Score Cutoff", 
-            min_value=0.50, 
-            max_value=0.99, 
-            value=0.85, 
-            step=0.01,
+            min_value=0.50, max_value=0.99, value=0.85, step=0.01,
             help="Higher numbers produce more isolated sub-graphs."
         )
     with col_param2:
         max_links = st.slider(
             "Max Links per Node", 
-            min_value=1, 
-            max_value=30, 
-            value=10, 
-            step=1,
+            min_value=1, max_value=30, value=10, step=1,
             help="Lower numbers make sparser networks."
+        )
+    with col_param3:
+        min_peaks = st.slider(
+            "Minimum Peaks per Spectrum", 
+            min_value=1, max_value=20, value=5, step=1,
+            help="Filters out low-quality spectra with fewer than this many peaks."
         )
     st.markdown("---")
 
@@ -150,7 +150,7 @@ with tab1:
 
                     # MatchMS Quality Filtering
                     workflow_clean = create_workflow(
-                        query_filters=DEFAULT_FILTERS + [("require_minimum_number_of_peaks", {"n_required": 5})],
+                        query_filters=DEFAULT_FILTERS + [("require_minimum_number_of_peaks", {"n_required": min_peaks})],
                     )
                     pipeline_clean = Pipeline(workflow_clean)
                     pipeline_clean.run(combined_path)
