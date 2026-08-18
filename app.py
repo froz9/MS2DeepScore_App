@@ -93,11 +93,18 @@ st.set_page_config(page_title="MS2DeepScore & MolNetEnhancer", layout="wide",
     page_icon="⚗️",
     menu_items={
         'Report a bug': "mailto:f9.alan@gmail.com",
-        'About': "# Web-App to perform cross-ionization molecular network using MS2DeepScore and integrating the MolNetEnhancer approach using the CANOPUS-derived file."
+        'About': "Web-App to perform cross-ionization molecular network using MS2DeepScore and integrating the MolNetEnhancer approach using the CANOPUS-derived file."
     }
     )
 st.title("MS2DeepScore Molecular Networking & Annotation Pipeline")
-st.image("logo_L125.png", width=300)
+c1, c2, c3 = st.columns([1, 2, 1])
+with c2:
+    # Adjust width as needed for your specific logo
+    st.image("logo_L125.png", width=300)
+
+st.markdown("---")
+st.write("Lab 125, Chemistry Faculty, UNAM, MX")
+
 
 tab1, tab2 = st.tabs(["Step 1: Network & Spectral Mapping", "Step 2: Annotations & MolNetEnhancer"])
 
