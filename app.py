@@ -102,10 +102,6 @@ with c2:
     # Adjust width as needed for your specific logo
     st.image("logo_L125.png", width=300)
 
-st.markdown("---")
-st.write("Lab 125, Chemistry Faculty, UNAM, MX")
-
-
 tab1, tab2 = st.tabs(["Step 1: Network & Spectral Mapping", "Step 2: Annotations & MolNetEnhancer"])
 
 # ---------------------------------------------------------
@@ -281,6 +277,9 @@ with tab1:
                 mime="text/plain",
                 key="btn_dl_mgf_tab1"
             )
+
+st.markdown("---")
+st.write("Lab 125, Chemistry Faculty, UNAM, MX")
 
 # ---------------------------------------------------------
 # TAB 2: Annotations Merging & MolNetEnhancer Execution
