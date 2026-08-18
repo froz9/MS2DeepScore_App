@@ -96,13 +96,13 @@ st.set_page_config(page_title="MS2DeepScore & MolNetEnhancer", layout="wide",
         'About': "Web-App to perform cross-ionization molecular network using MS2DeepScore and integrating the MolNetEnhancer approach using the CANOPUS-derived file."
     }
     )
-st.title("MS2DeepScore Molecular Networking & Annotation Pipeline")
+st.title("MS2DeepScore Molecular Networking & MolNetEnhancer integration tool")
 c1, c2, c3 = st.columns([1, 2, 1])
 with c2:
     # Adjust width as needed for your specific logo
     st.image("logo_L125.png", width=300)
 
-tab1, tab2 = st.tabs(["Step 1: Network & Spectral Mapping", "Step 2: Annotations & MolNetEnhancer"])
+tab1, tab2 = st.tabs(["Step 1: Network & Spectral Mapping", "Step 2: MolNetEnhancer using CANOPUS"])
 
 # ---------------------------------------------------------
 # TAB 1: MS2 Processing & GraphML Generation
@@ -113,9 +113,9 @@ with tab1:
     
     col1, col2 = st.columns(2)
     with col1:
-        pos_file = st.file_uploader("Upload POS MGF", type=["mgf"], key="pos_mgf")
+        pos_file = st.file_uploader("Upload POSITIVE MODE MGF", type=["mgf"], key="pos_mgf")
     with col2:
-        neg_file = st.file_uploader("Upload NEG MGF", type=["mgf"], key="neg_mgf")
+        neg_file = st.file_uploader("Upload NEGATIVE MODE MGF", type=["mgf"], key="neg_mgf")
         
     st.markdown("""
     ### ⚙️ Network Parameters Guide
@@ -145,7 +145,7 @@ with tab1:
             min_value=1, max_value=20, value=5, step=1,
             help="Filters out low-quality spectra with fewer than this many peaks."
         )
-    st.markdown("---")
+
 
     if pos_file and neg_file:
         if st.button("Run Spectral Pipeline", key="btn_step1"):
