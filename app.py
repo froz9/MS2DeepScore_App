@@ -90,7 +90,7 @@ def define_consensus_classes(data: pd.DataFrame) -> pd.DataFrame:
 # 3. STREAMLIT USER INTERFACE
 # ---------------------------------------------------------
 st.set_page_config(page_title="MS2DeepScore & MolNetEnhancer", layout="wide",
-    page_icon="⚗️",
+    page_icon="🧪",
     menu_items={
         'Report a bug': "mailto:f9.alan@gmail.com",
         'About': "Web-App to perform cross-ionization molecular network using MS2DeepScore and integrating the MolNetEnhancer approach using the CANOPUS-derived file."
