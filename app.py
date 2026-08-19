@@ -96,7 +96,7 @@ st.set_page_config(page_title="MS2DeepScore & MolNetEnhancer", layout="wide",
         'About': "Web-App to perform cross-ionization molecular network using MS2DeepScore and integrating the MolNetEnhancer approach using the CANOPUS-derived file."
     }
     )
-st.logo("logo_L125.png", width=200)
+st.sidebar.image("logo_L125.png", width=250)
 st.title("MS2DeepScore Molecular Networking & MolNetEnhancer integration tool")
 
 
