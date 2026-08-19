@@ -279,7 +279,7 @@ with tab1:
             )
 
 st.markdown("---")
-st.write("Lab 125, Chemistry Faculty, UNAM, MX")
+st.write("This work was supported by Universidad Nacional Autónoma de México Postdoctoral Program at Lab 125, Chemistry Faculty, UNAM, MX")
 
 # ---------------------------------------------------------
 # TAB 2: Annotations Merging & MolNetEnhancer Execution
