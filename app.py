@@ -96,11 +96,9 @@ st.set_page_config(page_title="MS2DeepScore & MolNetEnhancer", layout="wide",
         'About': "Web-App to perform cross-ionization molecular network using MS2DeepScore and integrating the MolNetEnhancer approach using the CANOPUS-derived file."
     }
     )
+st.logo("logo_L125.png")
 st.title("MS2DeepScore Molecular Networking & MolNetEnhancer integration tool")
-c1, c2, c3 = st.columns([1, 2, 1])
-with c2:
-    # Adjust width as needed for your specific logo
-    st.image("logo_L125.png", width=300)
+
 
 tab1, tab2 = st.tabs(["Step 1: Network & Spectral Mapping", "Step 2: MolNetEnhancer using CANOPUS"])
 
@@ -121,7 +119,7 @@ with tab1:
     ### ⚙️ Network Parameters Guide
     * **Score Cutoff**: The minimum MS2DeepScore similarity (0.0 to 1.0) required to draw an edge between two spectra. Higher values (e.g., 0.85) produce stricter, highly confident connections and more isolated sub-graphs. Lowering it connects more distant chemical relatives but risks creating an unreadable "hairball".
     * **Max Links per Node**: Limits how many connections a single spectrum can have. Keeping this low (e.g., 10) ensures the network remains sparse and visually interpretable by only retaining the absolute top matches for each node.
-    * **Minimum Peaks per Spectrum: Some spectra can have only 3 or 4 highly confident peaks. Spectra with fewer than the selected minimum will be filtered out for network generation.
+    * **Minimum Peaks per Spectrum**: Some spectra can have only 3 or 4 highly confident peaks. Spectra with fewer than the selected minimum will be filtered out for network generation.
     """)
 
     # Notice the 4 spaces here so it perfectly aligns with st.markdown above!
