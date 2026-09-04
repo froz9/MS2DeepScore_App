@@ -187,15 +187,18 @@ with tab1:
 
                     def get_safe_rt(spec):
                         """Safely extracts retention time in minutes for MS-DIAL and MZmine formats."""
-                        # MS-DIAL format or standard matchms parsing
-                        rt = spec.get("rtinminutes") or spec.get("retention_time")
+                        # 1. Explicitly check for MS-DIAL's minutes key first
+                        if spec.get("rtinminutes") is not None:
+                            return float(spec.get("rtinminutes"))
+                        
+                        # 2. Explicitly check for MZmine's seconds key and convert
+                        if spec.get("rtinseconds") is not None:
+                            return float(spec.get("rtinseconds")) / 60.0
+                            
+                        # 3. Fallback to generic retention_time if neither specific key exists
+                        rt = spec.get("retention_time")
                         if rt is not None:
                             return float(rt)
-                        
-                        # MZmine format
-                        rt_sec = spec.get("rtinseconds")
-                        if rt_sec is not None:
-                            return float(rt_sec) / 60.0
                             
                         return None
 
