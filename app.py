@@ -185,6 +185,20 @@ with tab1:
                             prec_mz = pep[0] if isinstance(pep, (tuple, list)) else pep
                         return prec_mz
 
+                    def get_safe_rt(spec):
+                        """Safely extracts retention time in minutes for MS-DIAL and MZmine formats."""
+                        # MS-DIAL format or standard matchms parsing
+                        rt = spec.get("rtinminutes") or spec.get("retention_time")
+                        if rt is not None:
+                            return float(rt)
+                        
+                        # MZmine format
+                        rt_sec = spec.get("rtinseconds")
+                        if rt_sec is not None:
+                            return float(rt_sec) / 60.0
+                            
+                        return None
+
                     for i, spectrum in enumerate(pos_cleaned):
                         query_id = f"pos_{i + 1}"
                         spectrum.set("query_spectrum_nr", query_id)
@@ -194,7 +208,7 @@ with tab1:
                             "QUERY_SPECTRUM_NR": query_id,
                             "IONMODE": "positive",
                             "PRECURSOR_MZ": get_safe_precursor_mz(spectrum),
-                            "RT": spectrum.get("rtinminutes") or spectrum.get("retention_time")
+                            "RT": get_safe_rt(spectrum) # Updated line
                         })
 
                     for i, spectrum in enumerate(neg_cleaned):
@@ -206,7 +220,7 @@ with tab1:
                             "QUERY_SPECTRUM_NR": query_id,
                             "IONMODE": "negative",
                             "PRECURSOR_MZ": get_safe_precursor_mz(spectrum),
-                            "RT": spectrum.get("rtinminutes") or spectrum.get("retention_time")
+                            "RT": get_safe_rt(spectrum) # Updated line
                         })
 
                     numbered_path = os.path.join(tmpdir, "cleaned_numbered.mgf")
