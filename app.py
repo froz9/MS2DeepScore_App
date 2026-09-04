@@ -135,7 +135,7 @@ with tab1:
     with col_param2:
         max_links = st.slider(
             "Max Links per Node", 
-            min_value=1, max_value=30, value=10, step=1,
+            min_value=1, max_value=20, value=10, step=1,
             help="Lower numbers make sparser networks."
         )
     with col_param3:
