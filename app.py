@@ -5,6 +5,7 @@ import pandas as pd
 import networkx as nx
 import streamlit as st
 
+from matchms import calculate_scores
 from matchms.importing import load_from_mgf
 from matchms.exporting import save_as_mgf
 from matchms.Pipeline import Pipeline, create_workflow
@@ -212,14 +213,18 @@ with tab1:
                     all_cleaned = pos_cleaned + neg_cleaned
                     save_as_mgf(all_cleaned, numbered_path)
 
-                    # Scoring Pipeline
+# Scoring
                     model = get_ms2deepscore_model()
-                    workflow_score = create_workflow(
-                        query_filters=[],
-                        score_computations=[[MS2DeepScore, {"model": model}]],
+                    similarity_measure = MS2DeepScore(model=model)
+                    
+                    # Calculate scores directly, explicitly forcing array_type="numpy"
+                    scores = calculate_scores(
+                        all_cleaned, 
+                        all_cleaned, 
+                        similarity_measure, 
+                        is_symmetric=True, 
+                        array_type="numpy"
                     )
-                    pipeline_score = Pipeline(workflow_score)
-                    pipeline_score.run(numbered_path)
 
                     # Network Construction
                     ms2ds_network = SimilarityNetwork(
@@ -228,7 +233,9 @@ with tab1:
                         max_links=max_links,
                         link_method="mutual",
                     )
-                    ms2ds_network.create_network(pipeline_score.scores, score_name="MS2DeepScore")
+                    
+                    # Pass the newly created 'scores' object here instead of pipeline_score.scores
+                    ms2ds_network.create_network(scores, score_name="MS2DeepScore")
 
                     graphml_path = os.path.join(tmpdir, "ms2ds_graph.graphml")
                     ms2ds_network.export_to_graphml(graphml_path)
